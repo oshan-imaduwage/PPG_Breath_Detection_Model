@@ -1,12 +1,3 @@
-"""
-Module 4: Neural Network Architecture
-======================================
-Parallel multi-branch 1D-CNN with dual outputs (classifier + regressor).
-Three independent encoders feed a fusion core and a primary-only regularisation
-path. Both paths produce classification logits; only the fusion path produces
-the final regression location.
-"""
-
 from __future__ import annotations
 import torch
 import torch.nn as nn
@@ -14,7 +5,6 @@ import sys
 sys.path.append("/content/drive/MyDrive/Colab_Notebooks")
 from PPG_Breath_Model_Preprocessing import Config, BIDMCLoader
 from PPG_Breath_Model_Dataset import RespiratoryWindowDataset, make_loader
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # BUILDING BLOCKS
@@ -38,7 +28,6 @@ class ConvBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.block(x)
-
 
 class Encoder(nn.Module):
     """
@@ -64,7 +53,6 @@ class Encoder(nn.Module):
         for block in self.blocks:
             x = block(x)
         return x
-
 
 class CoreNetwork(nn.Module):
     """
@@ -118,9 +106,6 @@ class CoreNetwork(nn.Module):
             self._build_dense(x.shape[1], x.device)
         return self._dense(x)
 
-
-
-
 class ClassificationHead(nn.Module):
     """
     Two-layer MLP producing un-normalised logits (NOT passed through sigmoid).
@@ -142,7 +127,6 @@ class ClassificationHead(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
-
 
 class RegressionHead(nn.Module):
     """
@@ -169,7 +153,6 @@ class RegressionHead(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x) * self.window_samples
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FULL MODEL
@@ -305,3 +288,93 @@ class RespiratoryDetector(nn.Module):
             "loc":            loc_fusion,
             "loc_primary":    loc_primary,   # None during inference
         }
+
+# # ─────────────────────────────────────────────────────────────────────────────
+# # QUICK TESTING
+# # ─────────────────────────────────────────────────────────────────────────────
+
+# if __name__ == "__main__":
+#     cfg   = Config()
+#     model = RespiratoryDetector(cfg)
+
+#     B, W = 8, cfg.WINDOW_SAMPLES
+#     dummy_ppg   = torch.randn(B, 1, W)
+#     dummy_ecg   = torch.randn(B, 1, W)
+#     dummy_rpeak = torch.rand(B, 1, W)
+
+#     # Training forward pass (loc_primary should be non-None)
+#     model.train()
+#     out = model(dummy_ppg, dummy_ecg, dummy_rpeak)
+#     assert out["loc_primary"] is not None, "loc_primary missing in training mode"
+#     print(f"[TRAIN] logits_fusion: {out['logits_fusion'].shape}  "
+#           f"prob: {out['prob'].shape}  loc: {out['loc'].shape}")
+
+#     # Inference forward pass (loc_primary should be None)
+#     model.eval()
+#     with torch.no_grad():
+#         out = model(dummy_ppg, dummy_ecg, dummy_rpeak)
+#     assert out["loc_primary"] is None, "loc_primary should be None in eval mode"
+#     print(f"[EVAL]  prob: {out['prob'].shape}  loc: {out['loc'].shape}")
+
+#     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+#     print(f"Trainable parameters: {n_params:,}")
+
+
+
+# from torchinfo import summary
+# import torch
+# # Assuming your Config and RespiratoryDetector classes are loaded
+# cfg = Config()
+# model = RespiratoryDetector(cfg)
+
+# # Pass dummy input sizes to visualize the flow (Batch=2, Channels=1, Time=500)
+# summary(
+#     model,
+#     input_size=[(2, 1, 500), (2, 1, 500), (2, 1, 500)],
+#     col_names=["input_size", "output_size", "num_params"],
+#     depth=4 # How deep into the blocks we want to look
+# )
+
+# # 1. Initialize the model
+# cfg = Config()
+# loader = BIDMCLoader(cfg)
+# sample = loader._load_one(f"{cfg.BIDMC_DIR}/bidmc01")
+
+# dataset = RespiratoryWindowDataset([sample], cfg, augment=False)
+# dataloader = make_loader(dataset, cfg, train=True, num_workers=0)
+# batch = next(iter(dataloader))
+# model = RespiratoryDetector(cfg)
+
+# # 2. Put the model in "Evaluation" mode (turns off Dropout so predictions are stable)
+# model.eval()
+
+
+
+# # 3. Pass the real patient batch into the model
+# # We use torch.no_grad() because we are just testing, not training (saves memory!)
+# with torch.no_grad():
+#     outputs = model(
+#         batch['primary'],      # PPG
+#         batch['auxiliary'],    # ECG
+#         batch['aux_marker1']   # R-peaks
+#     )
+
+# # 4. Inspect the outputs!
+# print("--- MODEL PREDICTIONS ON REAL DATA ---")
+# print(f"Probabilities shape: {outputs['prob'].shape}")
+# print(f"Predicted Locations shape: {outputs['loc'].shape}")
+
+# print("\n--- A PEEK AT THE ACTUAL NUMBERS ---")
+# # Let's look at what the completely untrained network guessed for the first 3 windows:
+# print(f"Probabilities (Inhale, Exhale):\n{outputs['prob'][:3]}")
+# print(f"\nPredicted Locations (Sample Index):\n{outputs['loc'][:3]}")
+
+# print("\n--- GROUND TRUTH VS. PREDICTIONS (First 3 Windows) ---")
+
+# print("\n1. PROBABILITIES (Is there an Inhale / Exhale present?)")
+# print(f"Real Answers (Target):\n{batch['t_prob'][:3]}")
+# print(f"Model Guesses:\n{outputs['prob'][:3]}")
+
+# print("\n2. LOCATIONS (At what exact sample index?)")
+# print(f"Real Answers (Target):\n{batch['t_loc'][:3]}")
+# print(f"Model Guesses:\n{outputs['loc'][:3]}")

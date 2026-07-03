@@ -1,11 +1,3 @@
-"""
-Module 5: Masked Loss Function & Training Loop
-================================================
-Composite loss L = α·L_cls + (1-α)·L_reg with critical regression masking.
-Gradient accumulation over 8 steps simulates an effective batch of 2048
-on Kaggle's T4 GPU (16 GB). Both pathways contribute to the total loss.
-"""
-
 from __future__ import annotations
 import time
 from collections import defaultdict
@@ -18,7 +10,6 @@ import sys
 sys.path.append("/content/drive/MyDrive/Colab_Notebooks")
 from PPG_Breath_Model_Preprocessing import Config
 from PPG_Breath_Model_Architecture import RespiratoryDetector
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MASKED COMPOSITE LOSS
@@ -196,7 +187,6 @@ def evaluate(
     n = len(loader)
     return {k: v / n for k, v in totals.items()}
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # FULL TRAINING DRIVER
 # ─────────────────────────────────────────────────────────────────────────────
@@ -290,3 +280,226 @@ def train(
     print(f"\n  Best val loss: {ckpt['val_loss']:.4f}  "
           f"(epoch {ckpt['epoch']})")
     return model
+
+# ─────────────────────────────────────────────────────────────────────────────
+# KAGGLE DUAL-GPU WRAPPER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def wrap_for_kaggle(model: RespiratoryDetector) -> nn.Module:
+    """
+    Kaggle T4×2 environments expose two GPUs via DataParallel.
+    This wraps the model IF two GPUs are available.
+
+    Note: DataParallel splits the BATCH dimension — gradient accumulation
+    still operates correctly at the optimizer level.
+    """
+    n_gpu = torch.cuda.device_count()
+    if n_gpu > 1:
+        print(f"  Using DataParallel across {n_gpu} GPUs.")
+        return nn.DataParallel(model)
+    return model
+
+# if __name__ == "__main__":
+#     # Smoke test: one forward + backward on CPU
+#     import numpy as np
+#     from PPG_Breath_Model_Dataset import RespiratoryWindowDataset, make_loader
+#     from PPG_Breath_Model_Preprocessing import SignalProcessor
+
+#     cfg  = Config()
+
+#     # ── CPU testing overrides ──────────────────────────────
+#     cfg.BATCH_SIZE = 16      # must be < number of windows (111 here)
+#     cfg.EPOCHS     = 2
+#     cfg.PATIENCE   = 2
+#     cfg.CKPT_PATH  = "/content/test_checkpoint.pt"
+#     # ───────────────────────────────────────────────────────
+
+#     proc = SignalProcessor(cfg)
+#     T    = 6000
+#     t_ax = np.linspace(0, 60, T)
+#     resp = np.sin(2 * np.pi * 0.25 * t_ax)
+#     labels = proc.extract_transitions(resp)
+#     fake_rec = {
+#         "primary":    np.random.randn(T).astype(np.float32),
+#         "auxiliary":  np.random.randn(T).astype(np.float32),
+#         "aux_marker1":np.random.rand(T).astype(np.float32),
+#         "labels":     labels,
+#     }
+#     ds     = RespiratoryWindowDataset([fake_rec], cfg)
+#     loader = make_loader(ds, cfg, train=True, num_workers=0)
+
+#     device  = torch.device("cpu")
+#     model   = RespiratoryDetector(cfg).to(device)
+#     loss_fn = MaskedCompositeLoss(cfg).to(device)
+#     opt     = torch.optim.AdamW(model.parameters(), lr=cfg.LR)
+#     # scaler  = torch.cuda.amp.GradScaler(enabled=False)  # disabled on CPU
+#     scaler = torch.amp.GradScaler('cuda',enabled = False)
+
+#     batch  = next(iter(loader))
+#     preds  = model(batch["primary"], batch["auxiliary"], batch["aux_marker1"])
+#     losses = loss_fn(preds, {"t_prob": batch["t_prob"], "t_loc": batch["t_loc"]})
+#     losses["total"].backward()
+
+#     print(f"Loss: {losses['total'].item():.4f}  "
+#           f"cls={losses['cls'].item():.4f}  reg={losses['reg'].item():.4f}")
+#     print("Backward pass OK — gradients flow correctly.")
+
+# import torch
+# import numpy as np
+# from PPG_Breath_Model_Preprocessing import Config, SignalProcessor
+# from PPG_Breath_Model_Dataset import RespiratoryWindowDataset, make_loader
+# from PPG_Breath_Model_Architecture import RespiratoryDetector
+# # from module5_train import MaskedCompositeLoss
+
+# cfg    = Config()
+# # ── CPU testing overrides ──────────────────────────────
+# cfg.BATCH_SIZE = 16      # must be < number of windows (111 here)
+# cfg.EPOCHS     = 2
+# cfg.PATIENCE   = 2
+# cfg.CKPT_PATH  = "/content/test_checkpoint.pt"
+# # ───────────────────────────────────────────────────────
+
+
+# proc   = SignalProcessor(cfg)
+# device = torch.device("cpu")
+
+# T    = 6000
+# t    = np.linspace(0, 60, T)
+# resp = np.sin(2 * np.pi * 0.25 * t)
+
+# fake_rec = {
+#     "primary":     np.random.randn(T).astype(np.float32),
+#     "auxiliary":   np.random.randn(T).astype(np.float32),
+#     "aux_marker1": np.random.rand(T).astype(np.float32),
+#     "labels":      proc.extract_transitions(resp),
+# }
+
+# ds      = RespiratoryWindowDataset([fake_rec], cfg)
+# loader  = make_loader(ds, cfg, train=True, num_workers=0)
+# model   = RespiratoryDetector(cfg).to(device)
+# loss_fn = MaskedCompositeLoss(cfg).to(device)
+
+# for batch in loader:
+#     preds  = model(batch["primary"], batch["auxiliary"], batch["aux_marker1"])
+#     losses = loss_fn(preds, {"t_prob": batch["t_prob"], "t_loc": batch["t_loc"]})
+#     assert not torch.isnan(losses["total"]), "NaN loss detected!"
+#     assert not torch.isinf(losses["total"]), "Inf loss detected!"
+
+# print("No NaN or Inf losses — loss function is stable")
+
+# model.zero_grad()
+# batch  = next(iter(loader))
+# preds  = model(batch["primary"], batch["auxiliary"], batch["aux_marker1"])
+# losses = loss_fn(preds, {"t_prob": batch["t_prob"], "t_loc": batch["t_loc"]})
+# losses["total"].backward()
+
+# no_grad = []
+# for name, param in model.named_parameters():
+#     if param.requires_grad and param.grad is None:
+#         no_grad.append(name)
+
+# if no_grad:
+#     print(f"WARNING — no gradient for: {no_grad}")
+# else:
+#     print("All parameters received gradients")
+
+# from PPG_Breath_Model_Preprocessing import subject_split
+
+# # Override paths for Colab
+# cfg.CKPT_PATH = "/content/test_checkpoint.pt"
+# cfg.EPOCHS    = 2
+# cfg.PATIENCE  = 2
+# cfg.BATCH_SIZE = 8   # small for CPU speed
+
+# train_recs, val_recs = subject_split([fake_rec, fake_rec, fake_rec], val_fraction=0.33)
+
+# train_ds = RespiratoryWindowDataset(train_recs, cfg, augment=True)
+# val_ds   = RespiratoryWindowDataset(val_recs,   cfg, augment=False)
+
+# train_loader = make_loader(train_ds, cfg, train=True,  num_workers=0)
+# val_loader   = make_loader(val_ds,   cfg, train=False, num_workers=0)
+
+# model  = RespiratoryDetector(cfg)
+# model  = train(model, train_loader, val_loader, cfg, device)
+# print("Full training loop ran without errors")
+
+# import torch
+# import random
+# from pathlib import Path
+
+# # --- Imports from your custom modules ---
+# # Ensure these match your actual file/class names!
+# from PPG_Breath_Model_Preprocessing import Config, BIDMCLoader
+# from PPG_Breath_Model_Dataset import RespiratoryWindowDataset, make_loader
+# from PPG_Breath_Model_Architecture import RespiratoryDetector
+
+# # ==========================================
+# # 1. CONFIGURATION FOR A QUICK TEST
+# # ==========================================
+# cfg = Config()
+# cfg.EPOCHS = 2          # Override to only run 2 epochs!
+# # cfg.BATCH_SIZE = 128  # Uncomment and lower this if your GPU runs out of memory (OOM error)
+
+# print(f"Starting pipeline on {cfg.EPOCHS} epochs...")
+
+# # ==========================================
+# # 2. THE FARMER: LOAD ALL PATIENTS
+# # ==========================================
+# print("\nLoading raw BIDMC dataset from hard drive...")
+# loader = BIDMCLoader(cfg)
+# all_recordings = loader.load_all()
+
+# # ==========================================
+
+# # ==========================================
+# # 3. THE SPLIT: TRAIN VS VALIDATION
+# # ==========================================
+# # Shuffle the patients randomly so we don't always train on the exact same ones
+# random.seed(42) # Set seed for reproducibility
+# random.shuffle(all_recordings)
+
+# # 80% for training, 20% for testing (validation)
+# split_idx = int(len(all_recordings) * 0.8)
+# train_recs = all_recordings[:split_idx]
+# val_recs   = all_recordings[split_idx:]
+
+# print(f"🔀 Split data: {len(train_recs)} patients for Training, {len(val_recs)} for Validation.")
+
+# # ==========================================
+# # 4. THE CHEF: CREATE DATASETS & LOADERS
+# # ==========================================
+# print("\nPreparing PyTorch Datasets...")
+# # Turn ON augmentation for training to make the model robust
+# train_ds = RespiratoryWindowDataset(train_recs, cfg, augment=True)
+
+# # Turn OFF augmentation for validation (we want to test on pure, unaltered real-world data)
+# val_ds = RespiratoryWindowDataset(val_recs, cfg, augment=False)
+
+# print(f"✅ Train Windows: {len(train_ds)} | Val Windows: {len(val_ds)}")
+
+# # Create the Waiters (Loaders)
+# # num_workers=0 is usually safest for Kaggle/Colab quick tests
+# train_loader = make_loader(train_ds, cfg, train=True, num_workers=0)
+# val_loader   = make_loader(val_ds, cfg, train=False, num_workers=0)
+
+# # ==========================================
+# # 5. THE BRAIN: INITIALIZE MODEL
+# # ==========================================
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# print(f"\nInitializing Neural Network on {device}...")
+# model = RespiratoryDetector(cfg)
+
+# # ==========================================
+# # 6. TEACH: THE TRAINING LOOP
+# # ==========================================
+# print("\n🔥 STARTING TRAINING LOOP 🔥")
+# # This calls the train() function from module5_train.py!
+# trained_model = train(
+#     model=model,
+#     train_loader=train_loader,
+#     val_loader=val_loader,
+#     cfg=cfg,
+#     device=device
+# )
+
+# print("\n🎉 TRAINING COMPLETE! The best model weights have been saved.")

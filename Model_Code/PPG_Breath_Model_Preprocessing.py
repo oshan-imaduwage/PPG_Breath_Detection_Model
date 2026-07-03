@@ -1,6 +1,3 @@
-# pip install wfdb
-# Had to install wfdb to read from PhysioNet datasets
-
 from __future__ import annotations
 import os
 import pickle
@@ -12,7 +9,6 @@ import numpy as np
 import wfdb
 from scipy import signal as sp_signal
 from scipy.ndimage import gaussian_filter1d
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MODULE 1 — CONFIG
@@ -67,9 +63,9 @@ class Config:
     REFRACTORY_S:  float = 1.5       # Min time between same-type transitions (s)
 
     # ── Paths (set these before running) ─────────────────────────────────────
-    BIDMC_DIR: str = "/content/drive/MyDrive/Colab_Notebooks/Data/bidmc-ppg-and-respiration-dataset-1.0.0"
-    WESAD_DIR: str = "/content/drive/MyDrive/Colab_Notebooks/Data/WESAD"
-    CKPT_PATH: str = "/content/drive/MyDrive/Colab_Notebooks/working/best_model.pt"
+    BIDMC_DIR: str = "/content/drive/MyDrive/Colab Notebooks/Data/bidmc-ppg-and-respiration-dataset-1.0.0"
+    WESAD_DIR: str = "/content/drive/MyDrive/Colab Notebooks/Data/WESAD"
+    CKPT_PATH: str = "/content/drive/MyDrive/Colab Notebooks/working/best_model.pt"
 
     # ── Derived (read-only) ──────────────────────────────────────────────────
     @property
@@ -133,15 +129,24 @@ class SignalProcessor:
 
     # ── Normalisation ────────────────────────────────────────────────────────
 
+    # def normalize_window(self, x: np.ndarray) -> np.ndarray:
+    #     """
+    #     Robust per-window normalisation using 98th percentile of |x|.
+    #     Prevents outlier peaks from dominating the scale.
+    #     """
+    #     denom = np.percentile(np.abs(x), 98)
+    #     if denom < 1e-8:
+    #         return x
+    #     return (x / denom).astype(np.float32)
+
+    # PPG_Breath_Model_Preprocessing.py
     def normalize_window(self, x: np.ndarray) -> np.ndarray:
-        """
-        Robust per-window normalisation using 98th percentile of |x|.
-        Prevents outlier peaks from dominating the scale.
-        """
-        denom = np.percentile(np.abs(x), 98)
-        if denom < 1e-8:
-            return x
-        return (x / denom).astype(np.float32)
+      denom = np.percentile(np.abs(x), 98)
+      if denom < 1e-8:
+          return np.clip(x, -10.0, 10.0).astype(np.float32)
+
+      # Cap the maximum normalized value to prevent float16 overflow
+      return np.clip(x / denom, -10.0, 10.0).astype(np.float32)
 
     # ── R-peak detection & smoothing ─────────────────────────────────────────
 
@@ -206,7 +211,6 @@ class SignalProcessor:
         labels[peaks]   = 2
         return labels
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # BIDMC LOADER
 # ─────────────────────────────────────────────────────────────────────────────
@@ -246,7 +250,7 @@ class BIDMCLoader:
         for hea in record_names:
             # SAFEST WAY: Strips the '.hea' extension from the absolute path
             record_base_path = str(hea.with_suffix(''))
-            
+
             try:
                 # Pass the clean path directly to _load_one
                 rec = self._load_one(record_base_path)
@@ -269,7 +273,6 @@ class BIDMCLoader:
         raw_ppg = sig[:,idx_ppg].astype(np.float32)
         raw_resp = sig[:,idx_resp].astype(np.float32)
         raw_ecg = sig[:,idx_ecg].astype(np.float32)
-
         # Drop recordings with excessive NaNs
         if np.isnan(raw_ppg).mean() > 0.05:
             return None
@@ -301,7 +304,6 @@ class BIDMCLoader:
             "labels":      labels,
             "subject_id":  Path(record_path).name,
         }
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WESAD LOADER
@@ -403,3 +405,85 @@ def subject_split(recordings: list, val_fraction: float = 0.15,
     train = [recordings[i] for i in train_idx]
     val   = [recordings[i] for i in val_idx]
     return train, val
+
+# import matplotlib.pyplot as plt
+# import numpy as np
+
+# cfg = Config()
+# cfg.BIDMC_DIR = "/content/drive/MyDrive/Colab_Notebooks/Data/bidmc-ppg-and-respiration-dataset-1.0.0"
+# train_loader = BIDMCLoader(cfg)
+
+# sample = train_loader._load_one(f"{cfg.BIDMC_DIR}/bidmc01")
+
+# if sample is not None:
+#     T_plot = 1000
+#     time = np.arange(T_plot) / cfg.TARGET_FS
+
+#     ppg = sample["primary"][:T_plot]
+#     ecg = sample["auxiliary"][:T_plot]
+#     rpeaks = sample["aux_marker1"][:T_plot]
+#     labels = sample["labels"][:T_plot]
+
+#     # 4. Create stacked plots
+#     fig, axes = plt.subplots(4, 1, figsize=(12, 10), sharex=True)
+
+#     axes[0].plot(time, ppg, color='blue')
+#     axes[0].set_ylabel("Filtered PPG")
+
+#     axes[1].plot(time, ecg, color='red')
+#     axes[1].set_ylabel("Filtered ECG")
+
+#     axes[2].plot(time, rpeaks, color='green')
+#     axes[2].set_ylabel("Smoothed R-Peaks")
+
+#     axes[3].plot(time, labels, color='purple', drawstyle='steps-mid')
+#     axes[3].set_ylabel("Labels (0, 1, 2)")
+#     axes[3].set_xlabel("Time (seconds)")
+
+#     plt.tight_layout()
+#     plt.show()
+
+# else:
+#     print("File failed quality control or path was incorrect.")
+
+# # just to check if the preprocessing works for all the BIDMC datas
+# train_samples = train_loader.load_all()
+
+# cfg.WESAD_DIR = "/content/drive/MyDrive/Colab_Notebooks/Data/WESAD"
+
+# test_loader = WESADLoader(cfg)
+
+# sample = test_loader._load_one(f"{cfg.WESAD_DIR}/S16/S16.pkl")
+
+# if sample is not None:
+#     T_plot = 1000
+#     time = np.arange(T_plot) / cfg.TARGET_FS
+
+#     ppg = sample["primary"][:T_plot]
+#     ecg = sample["auxiliary"][:T_plot]
+#     rpeaks = sample["aux_marker1"][:T_plot]
+#     labels = sample["labels"][:T_plot]
+
+#     # 4. Create stacked plots
+#     fig, axes = plt.subplots(4, 1, figsize=(12, 10), sharex=True)
+
+#     axes[0].plot(time, ppg, color='blue')
+#     axes[0].set_ylabel("Filtered PPG")
+
+#     axes[1].plot(time, ecg, color='red')
+#     axes[1].set_ylabel("Filtered ECG")
+
+#     axes[2].plot(time, rpeaks, color='green')
+#     axes[2].set_ylabel("Smoothed R-Peaks")
+
+#     axes[3].plot(time, labels, color='purple', drawstyle='steps-mid')
+#     axes[3].set_ylabel("Labels (0, 1, 2)")
+#     axes[3].set_xlabel("Time (seconds)")
+
+#     plt.tight_layout()
+#     plt.show()
+
+# else:
+#     print("File failed quality control or path was incorrect.")
+
+# test_samples = test_loader.load_all()

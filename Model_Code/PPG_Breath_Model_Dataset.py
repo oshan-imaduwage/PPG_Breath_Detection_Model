@@ -1,11 +1,3 @@
-"""
-Module 3: PyTorch Dataset & Windowing Logic
-============================================
-Slices recordings into overlapping windows. Each window yields independently
-normalised PPG + ECG + R-peak tensors, plus binary probability and integer
-location targets — using -1 as the absence sentinel for regression masking.
-"""
-
 from __future__ import annotations
 import numpy as np
 import torch
@@ -181,7 +173,7 @@ class RespiratoryWindowDataset(Dataset):
         S = self.cfg.STRIDE_SAMPLES
 
 
-        # 
+        #
         n_pos = 0
         n_neg = 0
         for i, (rec_idx, start) in enumerate(self._windows):
@@ -240,3 +232,38 @@ def make_loader(dataset: RespiratoryWindowDataset, cfg: Config,
             pin_memory  = True,
         )
 
+# import torch
+
+# # 1. Load one real patient recording (using the code we built earlier)
+# cfg = Config()
+# loader = BIDMCLoader(cfg)
+# sample = loader._load_one(f"{cfg.BIDMC_DIR}/bidmc05")
+
+# if sample is not None:
+#     # 2. Pass it into the Dataset (it expects a list of recordings)
+#     # We turn ON augmentation just to see it work
+#     dataset = RespiratoryWindowDataset([sample], cfg, augment=True)
+#     print(f"Total windows created for this patient: {len(dataset)}")
+
+#     # 3. Pass the Dataset into the DataLoader factory
+#     # num_workers=0 is safer for quick Colab tests
+#     dataloader = make_loader(dataset, cfg, train=True, num_workers=0)
+
+#     # 4. Pull exactly one batch of data from the "hat"
+#     batch = next(iter(dataloader))
+
+#     # 5. Inspect the PyTorch Tensors!
+#     print("\n--- BATCH INSPECTION ---")
+#     print(f"Primary (PPG) shape: {batch['primary'].shape}")
+#     print(f"Auxiliary (ECG) shape: {batch['auxiliary'].shape}")
+#     print(f"R-peak marker shape: {batch['aux_marker1'].shape}")
+#     print(f"Target Probabilities shape: {batch['t_prob'].shape}")
+#     print(f"Target Locations shape: {batch['t_loc'].shape}")
+
+#     # Let's see how many windows in this batch actually contain a transition
+#     # Because of our WeightedRandomSampler, this shouldn't be zero!
+#     transitions_in_batch = batch['t_prob'].sum().item()
+#     print(f"\nTotal transition events captured in this batch: {transitions_in_batch}")
+
+# else:
+#     print("Could not load the test file.")
