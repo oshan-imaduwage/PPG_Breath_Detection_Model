@@ -7,7 +7,10 @@ This architecture was heavily inspired by the paper ["A Dual Classifier-Regresso
 *   **Original Design:** The source architecture processed 400 ms windows of PCG and ECG data to identify S1 and S2 heart sounds. It utilized separate R-peak and T-peak encoders and relied on a Flatten + Dense network block to output exact sample locations.
 *   **Our Adaptation:** I ported this architecture to detect respiratory phases and swapped the PCG input for PPG and increased the window size to 3.0 seconds to capture slower respiratory cycles. Because respiration lacks a strict lock to the T-wave, we utilized only a single auxiliary R-peak marker alongside the primary signals.
 
-## Model Architecture
+## Model Architecture 
+
+<img src="https://github.com/oshan-imaduwage/PPG_Breath_Detection_Model/blob/4d3e7179e5251f1fdd3dbb51a4cbca57fd6357a0/Images/ppg_model.onnx.png" width="500"/>
+
 ### 1. Preprocessing
 We use the BIDMC dataset to feed PPG, ECG, and Respiration Impedance signals as inputs, down-sampled to 100Hz and filtered as follows:
 - PPG Signal (0.1 to 0.5 Hz)
@@ -43,9 +46,11 @@ The overall loss function is a composite of Classification and Regression loss a
 ## Training and Hyperparameter Tuning
 I performed hyperparameter tuning by both manually tweaking parameters of significance (i.e. Window Sizes, Alpha, etc.) and by utilizing Optuna for multi-objective hyperparameter tuning (maximizing F1 while minimizing MAE) across Kaggle and Google Colab environments. The training notebooks are available in the `Model_Notebooks/` directory. 
 
-Despite implementing gradient scaling, Huber loss (Smooth L1), and LayerNorm fixes, the model's regressor failed to converge properly. 
+Despite implementing gradient scaling, Huber loss (Smooth L1), and LayerNorm fixes, the model's regressor failed to converge properly, as seen below with different window sizes:
 
-
+   1                       |  2
+:-------------------------:|:-------------------------:
+![](https://github.com/oshan-imaduwage/PPG_Breath_Detection_Model/blob/4d3e7179e5251f1fdd3dbb51a4cbca57fd6357a0/Images/trainwin2.png) |  ![](https://github.com/oshan-imaduwage/PPG_Breath_Detection_Model/blob/4d3e7179e5251f1fdd3dbb51a4cbca57fd6357a0/Images/trainwin3.png)
 
 ## Key Discoveries:
 Diagnostic testing revealed that the regressor suffered from "Mean Collapse." On a 3.0-second window (300 samples), the expected MAE of guessing the exact center of the window every time is 750 ms. The diagnostic runs consistently stalled at an MAE of ~714 ms to 749 ms. The model was effectively blind to time, guessing the middle of the window to minimize error.
